@@ -219,7 +219,7 @@ struct ChatView: View {
                 
                 if chatModel.id.contains("claude-3") {
                     if isStreamingEnabled {
-                        try await invokeClaudeModelStream(claudeMessages: chatManager.getClaudeHistory(for: chatModel.chatId) ?? [])
+                        try await invokeClaudeModelStream2(claudeMessages: chatManager.getClaudeHistory(for: chatModel.chatId) ?? [])
                     } else {
                         try await invokeClaudeModel(claudeMessages: chatManager.getClaudeHistory(for: chatModel.chatId) ?? [])
                     }
@@ -385,6 +385,73 @@ struct ChatView: View {
         
         chatManager.saveClaudeHistories()
     }
+
+    // MARK: - 自分で改善
+    func invokeClaudeModelStream2(claudeMessages: [ClaudeMessageRequest.Message]) async throws {
+        var isFirstChunk = true
+        var buffer = [[String: Any]]()
+        let updateInterval = 0.1
+
+        let timer = Timer.publish(every: updateInterval, on: .main, in: .common).autoconnect()
+        var timerCancellable: AnyCancellable? = nil
+
+        timerCancellable = timer.sink { _ in
+            let bufferCopy = buffer
+            DispatchQueue.main.async {
+                self.processBuffer(bufferCopy, isFirstChunk: &isFirstChunk)
+            }
+            buffer.removeAll()
+        }
+
+        let modelId = chatModel.id
+        let response = try await backend.invokeClaudeModelStream(withId: modelId, messages: claudeMessages)
+
+        for try await event in response {
+            switch event {
+            case .chunk(let part):
+                guard let jsonObject = try? JSONSerialization.jsonObject(with: part.bytes!, options: []) as? [String: Any] else {
+                    print("Failed to decode JSON")
+                    continue
+                }
+                buffer.append(jsonObject)
+            case .sdkUnknown(let unknown):
+                print("Unknown SDK event: \"\(unknown)\"")
+            }
+        }
+
+        // Process any remaining buffer
+        let finalBufferCopy = buffer
+        DispatchQueue.main.async {
+            self.processBuffer(finalBufferCopy, isFirstChunk: &isFirstChunk)
+        }
+        buffer.removeAll()
+
+        timerCancellable?.cancel()
+
+        if let lastMessage = messages.last {
+            let content = ClaudeMessageRequest.Message.Content(type: "text", text: lastMessage.text, source: nil)
+            chatManager.addClaudeHistory(for: chatModel.chatId, message: ClaudeMessageRequest.Message(role: "assistant", content: [content]))
+        }
+
+        chatManager.saveClaudeHistories()
+    }
+
+    private func processBuffer(_ buffer: [[String: Any]], isFirstChunk: inout Bool) {
+        for jsonObject in buffer {
+            if let type = jsonObject["type"] as? String {
+                switch type {
+                case "message_delta":
+                    handleMessageDelta(jsonObject)
+                case "content_block_delta":
+                    handleContentBlockDelta(jsonObject, isFirstChunk: &isFirstChunk)
+                default:
+                    print("Unhandled event type: \(type)")
+                }
+            }
+        }
+    }
+      // MARK: - 改善終わり
+    
     
     /// Handles message delta events.
     private func handleMessageDelta(_ jsonObject: [String: Any]) {

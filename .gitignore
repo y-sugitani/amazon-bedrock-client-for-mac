@@ -5,6 +5,7 @@
 
 # VScode
 .vscode
+.history/
 
 # Xcode
 xcuserdata/
@@ -63,4 +64,3 @@ Podfile.lock
 
 # Generated files
 DerivedData/
-

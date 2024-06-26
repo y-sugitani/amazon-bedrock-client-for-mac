@@ -93,7 +93,7 @@ struct MainView: View {
     // Function to select the Claude model
     func selectClaudeModel() {
         // Find a Claude v3 model in the organizedChatModels
-        if let claudeV3Model = organizedChatModels.flatMap({ $0.value }).first(where: { $0.id.contains("claude-3") }) {
+        if let claudeV3Model = organizedChatModels.flatMap({ $0.value }).first(where: { $0.id.contains("claude-3-5") }) {
             menuSelection = .chat(claudeV3Model)
         } else if let claudeV2Model = organizedChatModels.flatMap({ $0.value }).first(where: { $0.id.contains("claude-v2") }) {
             menuSelection = .chat(claudeV2Model)

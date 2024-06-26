@@ -14,6 +14,7 @@ import AWSBedrockRuntime
 import AWSClientRuntime
 import AppKit
 import AwsCommonRuntimeKit
+import SmithyIdentity
 
 // MARK: - Backend Class
 class BackendModel: ObservableObject {
@@ -55,7 +56,7 @@ struct Backend {
     
     // MARK: - Initializers
     
-    init(withCredentials creds: AWSTemporaryCredentials? = nil, region: String, endpoint: String, runtimeEndpoint: String) {
+    init(withCredentials creds: AWSTemporaryCredentials? = AWSTemporaryCredentials.fromConfigurationFile(), region: String, endpoint: String, runtimeEndpoint: String) {
         self.credentials = creds
         self.region = region
 #if DEBUG
@@ -105,13 +106,7 @@ struct Backend {
             logger.info("Request: \(requestJson)")
         }
         
-        let config: BedrockRuntimeClient.BedrockRuntimeClientConfiguration
-        if !self.runtimeEndpoint.isEmpty {
-            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region, endpoint: self.runtimeEndpoint)
-        } else {
-            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region)
-        }
-        
+        let config = try await createBedrockRuntimeConfig()
         let client = BedrockRuntimeClient(config: config)
         let response = try await client.invokeModel(input: request)
         
@@ -148,12 +143,7 @@ struct Backend {
             }
             
             // Create client and make the request
-            let config: BedrockRuntimeClient.BedrockRuntimeClientConfiguration
-            if !self.runtimeEndpoint.isEmpty {
-                config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region, endpoint: self.runtimeEndpoint)
-            } else {
-                config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region)
-            }
+            let config = try await createBedrockRuntimeConfig()
             let client = BedrockRuntimeClient(config: config)
             
             // Invoke the model and get the response stream
@@ -191,13 +181,7 @@ struct Backend {
             modelId: modelId
         )
 
-        let config: BedrockRuntimeClient.BedrockRuntimeClientConfiguration
-        if !self.runtimeEndpoint.isEmpty {
-            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region, endpoint: self.runtimeEndpoint)
-        } else {
-            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region)
-        }
-        
+        let config = try await createBedrockRuntimeConfig()
         let client = BedrockRuntimeClient(config: config)
         let response = try await client.invokeModel(input: request)
         
@@ -234,18 +218,47 @@ struct Backend {
             modelId: modelId
         )
         
-        let config: BedrockRuntimeClient.BedrockRuntimeClientConfiguration
-        if !self.runtimeEndpoint.isEmpty {
-            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region, endpoint: self.runtimeEndpoint)
-        } else {
-            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region)
-        }
-        
         // Invoke the model and get the response stream
+        let config = try await createBedrockRuntimeConfig()
         let client = BedrockRuntimeClient(config: config)
         let output = try await client.invokeModelWithResponseStream(input: request)
         
         return output.body ?? AsyncThrowingStream { _ in }
+    }
+    
+    func createBedrockRuntimeConfig() async throws -> BedrockRuntimeClient.BedrockRuntimeClientConfiguration {
+        let identity = SmithyIdentity.AWSCredentialIdentity(accessKey: self.credentials!.accessKey, secret: self.credentials!.secretAccessKey)
+        let resolver = try StaticAWSCredentialIdentityResolver(identity)
+        
+        let config: BedrockRuntimeClient.BedrockRuntimeClientConfiguration
+        if !self.runtimeEndpoint.isEmpty {
+            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(
+                awsCredentialIdentityResolver: resolver,
+                region: self.region, endpoint: self.runtimeEndpoint)
+        } else {
+            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(
+                awsCredentialIdentityResolver: resolver,
+                region: self.region)
+        }
+        
+        return config
+    }
+    
+    func createBedrockConfig() async throws -> BedrockClient.BedrockClientConfiguration {
+        let identity = SmithyIdentity.AWSCredentialIdentity(accessKey: self.credentials!.accessKey, secret: self.credentials!.secretAccessKey)
+        let resolver = try StaticAWSCredentialIdentityResolver(identity)
+        
+        let config: BedrockClient.BedrockClientConfiguration
+        if !self.runtimeEndpoint.isEmpty {
+            config = try await BedrockClient.BedrockClientConfiguration(
+                awsCredentialIdentityResolver: resolver,
+                region: self.region, endpoint: self.endpoint)
+        } else {
+            config = try await BedrockClient.BedrockClientConfiguration(
+                awsCredentialIdentityResolver: resolver,region: self.region)
+        }
+        
+        return config
     }
     
     func invokeStableDiffusionModel(withId modelId: String, prompt: String) async throws -> Data {
@@ -280,13 +293,7 @@ struct Backend {
         )
         
         // Create client and make the request
-        // Create client and make the request
-        let config: BedrockRuntimeClient.BedrockRuntimeClientConfiguration
-        if !self.runtimeEndpoint.isEmpty {
-            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region, endpoint: self.runtimeEndpoint)
-        } else {
-            config = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(region: self.region)
-        }
+        let config = try await createBedrockRuntimeConfig()
         let client = BedrockRuntimeClient(config: config)
         
         let response = try await client.invokeModel(input: request)
@@ -395,12 +402,7 @@ struct Backend {
                 byProvider: byProvider)
             
             // Create client and make the request
-            let config: BedrockClient.BedrockClientConfiguration
-            if !self.runtimeEndpoint.isEmpty {
-                config = try await BedrockClient.BedrockClientConfiguration(region: self.region, endpoint: self.endpoint)
-            } else {
-                config = try await BedrockClient.BedrockClientConfiguration(region: self.region)
-            }
+            let config = try await createBedrockConfig()
             let client = BedrockClient(config: config)
             
             let response = try await client.listFoundationModels(input: request)
@@ -531,7 +533,7 @@ extension AWSTemporaryCredentials {
         return ProcessInfo.processInfo.environment[named]
     }
     
-    static func fromConfigurationFile(forProfile profile: String = "default",
+    static func fromConfigurationFile(forProfile profile: String = "bedrock",
                                       filePath path: String = "~/.aws/credentials") -> AWSTemporaryCredentials {
         
         let credentialsURL = URL(fileURLWithPath: resolveFilePath(path))
@@ -554,11 +556,11 @@ extension AWSTemporaryCredentials {
                 inProfile = (currentProfile == profile)
             } else if inProfile {
                 if line.hasPrefix("aws_access_key_id") {
-                    accessKey = line.components(separatedBy: " = ").last!.trimmingCharacters(in: .whitespaces)
+                    accessKey = line.components(separatedBy: "=").last!.trimmingCharacters(in: .whitespaces)
                 } else if line.hasPrefix("aws_secret_access_key") {
-                    secretKey = line.components(separatedBy: " = ").last!.trimmingCharacters(in: .whitespaces)
+                    secretKey = line.components(separatedBy: "=").last!.trimmingCharacters(in: .whitespaces)
                 } else if line.hasPrefix("aws_session_token") {
-                    sessionToken = line.components(separatedBy: " = ").last!.trimmingCharacters(in: .whitespaces)
+                    sessionToken = line.components(separatedBy: "=").last!.trimmingCharacters(in: .whitespaces)
                 }
             }
         }
